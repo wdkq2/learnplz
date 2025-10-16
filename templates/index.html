@@ -4,11 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>수업 자료 AI 분석기 (서버 버전)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <script src="{{ url_for('static', filename='js/pdf.min.js') }}"></script>
-    <script>
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "{{ url_for('static', filename='js/pdf.worker.min.js') }}";
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233b82f6'/%3E%3Ctext x='50%25' y='50%25' dy='.35em' text-anchor='middle' font-family='Inter, sans-serif' font-size='32' fill='white'%3EL%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.10/dist/tailwind.min.css">
+
+    <script type="module">
+        import * as pdfjsLib from "{{ url_for('static', filename='js/pdf.min.js') }}";
+        const workerUrl = "{{ url_for('static', filename='js/pdf.worker.min.js') }}";
+        try {
+            const pdfWorker = new Worker(workerUrl, { type: 'module' });
+            pdfjsLib.GlobalWorkerOptions.workerPort = pdfWorker;
+        } catch (error) {
+            console.error('PDF.js 워커 초기화에 실패했습니다. 메인 스레드에서 렌더링합니다.', error);
+        }
+        window.pdfjsLib = pdfjsLib;
     </script>
     
     <style>
@@ -63,7 +71,6 @@
         <p>Orchestrator WebApp - Powered by Python (Flask), JavaScript, PDF.js, and DOCX.js</p>
     </footer>
 
-    <script src="{{ url_for('static', filename='js/docx.min.js') }}"></script>
     <script>
         const pdfFileInput = document.getElementById('pdfFile');
         const jsonFileInput = document.getElementById('jsonFile');
@@ -84,6 +91,10 @@
         }
 
         async function convertPdfToImages(file) {
+            const pdfjsLib = window.pdfjsLib;
+            if (!pdfjsLib) {
+                throw new Error('PDF.js 라이브러리가 초기화되지 않았습니다.');
+            }
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
             const images = [];
@@ -107,12 +118,12 @@
             const group_intent = group.intent;
 
             const content_parts = [
-                { type: "text", text: rule_prompt },
-                { type: "text", text: `## PDF 전체 요약:\n${global_prompt}` },
-                { type: "text", text: `## 이 그룹의 분석 초점:\n${group_intent}` },
+                { type: "input_text", text: rule_prompt },
+                { type: "input_text", text: `## PDF 전체 요약:\n${global_prompt}` },
+                { type: "input_text", text: `## 이 그룹의 분석 초점:\n${group_intent}` },
             ];
             groupImagesBase64.forEach(base64Image => {
-                content_parts.push({ type: "image_url", image_url: { url: base64Image } });
+                content_parts.push({ type: "input_image", image_url: base64Image });
             });
             
             const response = await fetch("/analyze", {
@@ -128,35 +139,32 @@
             return data.choices[0].message.content;
         }
         
-        async function createDocxReport(title, global_summary, analysis_results) {
-            const { Document, Packer, Paragraph, HeadingLevel, ImageRun, TextRun } = docx;
-            const doc = new Document({ sections: [{
-                children: [
-                    new Paragraph({ text: title.replace('.pdf', ''), heading: HeadingLevel.TITLE }),
-                    new Paragraph({ text: `생성일: ${new Date().toLocaleString()}`}),
-                    new Paragraph({ pageBreakBefore: true }),
-                    new Paragraph({ text: "Executive Summary", heading: HeadingLevel.HEADING_1 }),
-                    ...global_summary.split('\n').map(line => new Paragraph(line)),
-                    new Paragraph({ pageBreakBefore: true }),
-                    new Paragraph({ text: "상세 분석 (Detailed Analysis)", heading: HeadingLevel.HEADING_1 }),
-                ],
-            }]});
+        async function requestDocxReport(title, global_summary, analysis_results) {
+            const response = await fetch('/create-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title,
+                    global_summary,
+                    analysis_results,
+                }),
+            });
 
-            for (const result of analysis_results) {
-                const { group, images, analysis } = result;
-                doc.addSection({ children: [
-                    new Paragraph({ text: `그룹 ${group.id} (페이지: ${group.pages.join(', ')})`, heading: HeadingLevel.HEADING_2 }),
-                    new Paragraph({ children: [new TextRun({ text: "분석 초점: ", bold: true }), new TextRun(group.intent)] }),
-                ]});
-                for (const base64Image of images) {
-                    const response = await fetch(base64Image);
-                    const imageBuffer = await response.arrayBuffer();
-                    doc.addSection({ children: [new Paragraph({ children: [new ImageRun({ data: imageBuffer, transformation: { width: 550, height: 412.5 } })]})]});
+            if (!response.ok) {
+                let message = 'DOCX 보고서 생성 중 오류가 발생했습니다.';
+                try {
+                    const errorPayload = await response.json();
+                    message = errorPayload.error || message;
+                } catch (parseError) {
+                    console.warn('DOCX 보고서 오류 응답을 파싱할 수 없습니다.', parseError);
                 }
-                doc.addSection({ children: [ ...analysis.split('\n').map(line => new Paragraph(line)), new Paragraph("")]});
+                throw new Error(message);
             }
-            return Packer.toBlob(doc);
+
+            return response.blob();
         }
+
+        let previousDownloadUrl = null;
 
         runButton.addEventListener('click', async () => {
             const pdfFile = pdfFileInput.files[0];
@@ -198,10 +206,15 @@
                 }
                 
                 log('모든 그룹 분석 완료. DOCX 보고서를 생성합니다...');
-                const docBlob = await createDocxReport(pdfFile.name, prompts.global_prompt, allAnalysisResults);
+                log('  - 서버에 DOCX 보고서 생성 요청 전송...');
+                const docBlob = await requestDocxReport(pdfFile.name, prompts.global_prompt, allAnalysisResults);
                 log('✅ DOCX 보고서 생성 완료!', 'success');
 
                 const url = URL.createObjectURL(docBlob);
+                if (previousDownloadUrl) {
+                    URL.revokeObjectURL(previousDownloadUrl);
+                }
+                previousDownloadUrl = url;
                 downloadLink.href = url;
                 downloadLink.download = `${pdfFile.name.replace('.pdf', '')}_analysis_report.docx`;
                 resultSection.classList.remove('hidden');
