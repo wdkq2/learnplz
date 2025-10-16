@@ -18,7 +18,79 @@ app = Flask(__name__, template_folder='templates')
 
 # OpenAI API 키를 환경 변수에서 가져옵니다.
 API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_API_URL = "https://api.openai.com/v1/responses"
+
+
+def _normalize_content_parts(content_parts):
+    """Convert legacy chat-completions content parts into Responses API format."""
+    normalized = []
+    if not isinstance(content_parts, list):
+        return normalized
+
+    for part in content_parts:
+        if not isinstance(part, dict):
+            continue
+
+        part_type = part.get("type")
+        if part_type == "text":
+            text_value = part.get("text")
+            if isinstance(text_value, str):
+                normalized.append({"type": "input_text", "text": text_value})
+        elif part_type == "image_url":
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict) and image_url.get("url"):
+                normalized.append({"type": "input_image", "image_url": {"url": image_url["url"]}})
+
+    if not normalized:
+        for part in content_parts:
+            if isinstance(part, dict):
+                normalized.append(part)
+
+    return normalized
+
+
+def _extract_text_from_response(response_payload):
+    """Pull a best-effort assistant text string from a Responses API payload."""
+    if not isinstance(response_payload, dict):
+        return ""
+
+    output_text = response_payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+
+    collected = []
+    output_items = response_payload.get("output")
+    if isinstance(output_items, list):
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "message":
+                continue
+            contents = item.get("content") or []
+            if not isinstance(contents, list):
+                continue
+            for content in contents:
+                if not isinstance(content, dict):
+                    continue
+                text_value = content.get("text")
+                if isinstance(text_value, str) and text_value:
+                    collected.append(text_value)
+
+    if collected:
+        return "\n".join(collected)
+
+    # Fallback: if the upstream response still uses chat-completions layout, read it.
+    choices = response_payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0]
+        if isinstance(first_choice, dict):
+            message = first_choice.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str):
+                    return content
+
+    return ""
 
 @app.route('/')
 def index():
@@ -36,15 +108,18 @@ def analyze():
 
     data = request.json
     
+    content_parts = data.get("content_parts", [])
+    normalized_content = _normalize_content_parts(content_parts)
+
     # 프론트엔드에서 받은 데이터를 기반으로 OpenAI에 보낼 payload를 구성합니다.
     payload = {
         # gpt-5-mini는 텍스트와 이미지 URL이 혼합된 메시지를 처리할 수 있는 멀티모달 모델입니다.
         "model": "gpt-5-mini",
-        "messages": [{
+        "input": [{
             "role": "user",
-            "content": data.get("content_parts", [])
+            "content": normalized_content,
         }],
-        "max_tokens": 4096
+        "max_output_tokens": 4096,
     }
 
     headers = {
@@ -57,7 +132,12 @@ def analyze():
         response = requests.post(OPENAI_API_URL, headers=headers, json=payload)
         response.raise_for_status()  # HTTP 오류가 발생하면 예외를 발생시킵니다.
         print("✅ OpenAI API로부터 응답을 받았습니다.")
-        return jsonify(response.json())
+        response_payload = response.json()
+        analysis_text = _extract_text_from_response(response_payload)
+        return jsonify({
+            "choices": [{"message": {"content": analysis_text}}],
+            "raw_response": response_payload,
+        })
         
     except requests.exceptions.RequestException as e:
         # API 호출 실패 시 에러 메시지를 JSON 형식으로 반환합니다.
