@@ -124,9 +124,13 @@ def analyze():
     normalized_content = _normalize_content_parts(content_parts)
 
     # 프론트엔드에서 받은 데이터를 기반으로 OpenAI에 보낼 payload를 구성합니다.
+    requested_model = data.get("model", "gpt-5-mini")
+    allowed_models = {"gpt-5-mini", "gpt-4o"}
+    model = requested_model if requested_model in allowed_models else "gpt-5-mini"
+
     payload = {
         # gpt-5-mini는 텍스트와 이미지 URL이 혼합된 메시지를 처리할 수 있는 멀티모달 모델입니다.
-        "model": "gpt-5-mini",
+        "model": model,
         "input": [{
             "role": "user",
             "content": normalized_content,
@@ -140,7 +144,7 @@ def analyze():
     }
 
     try:
-        print("🚀 OpenAI API에 분석을 요청합니다...")
+        print(f"🚀 OpenAI API에 분석을 요청합니다... (model={model})")
         response = requests.post(OPENAI_API_URL, headers=headers, json=payload)
         response.raise_for_status()  # HTTP 오류가 발생하면 예외를 발생시킵니다.
         print("✅ OpenAI API로부터 응답을 받았습니다.")
