@@ -53,7 +53,7 @@
                         <option value="gpt-5-mini" selected>gpt-5-mini (기본)</option>
                         <option value="gpt-4o">gpt-4o</option>
                     </select>
-                    <p class="mt-2 text-xs text-gray-500">사용할 OpenAI 모델을 선택해주세요. 모델에 따라 응답 품질과 속도가 달라질 수 있습니다.</p>
+                    <p id="modelHint" class="mt-2 text-xs text-gray-500"></p>
                 </div>
             </div>
         </div>
@@ -80,16 +80,43 @@
     </footer>
 
     <script>
+        const MODEL_CONFIGS = {
+            'gpt-5-mini': {
+                label: 'gpt-5-mini (기본)',
+                description: '빠른 멀티모달 분석 · temperature 0.2 · max_tokens 4096 · top_p 0.8',
+                temperature: 0.2,
+                max_output_tokens: 4096,
+                top_p: 0.8,
+            },
+            'gpt-4o': {
+                label: 'gpt-4o',
+                description: '고품질 텍스트 분석 · temperature 0.6 · max_tokens 3072 · top_p 0.9',
+                temperature: 0.6,
+                max_output_tokens: 3072,
+                top_p: 0.9,
+            },
+        };
+
         const pdfFileInput = document.getElementById('pdfFile');
         const jsonFileInput = document.getElementById('jsonFile');
         const runButton = document.getElementById('runButton');
         const modelSelect = document.getElementById('modelSelect');
+        const modelHint = document.getElementById('modelHint');
         const statusSection = document.getElementById('statusSection');
         const statusTitle = document.getElementById('statusTitle');
         const spinner = document.getElementById('spinner');
         const logContainer = document.getElementById('logContainer');
         const resultSection = document.getElementById('resultSection');
         const downloadLink = document.getElementById('downloadLink');
+
+        function updateModelHint(model) {
+            const config = MODEL_CONFIGS[model];
+            if (!config) {
+                modelHint.textContent = '지원되지 않는 모델이 선택되었습니다. 기본 설정이 적용됩니다.';
+                return;
+            }
+            modelHint.textContent = config.description;
+        }
 
         function log(message, type = 'info') {
             const entry = document.createElement('div');
@@ -98,6 +125,14 @@
             logContainer.appendChild(entry);
             logContainer.scrollTop = logContainer.scrollHeight;
         }
+
+        modelSelect.addEventListener('change', () => {
+            updateModelHint(modelSelect.value);
+            const config = MODEL_CONFIGS[modelSelect.value];
+            if (config) {
+                log(`모델 ${config.label} 선택 → temperature=${config.temperature}, max_tokens=${config.max_output_tokens}, top_p=${config.top_p}`);
+            }
+        });
 
         async function convertPdfToImages(file) {
             const pdfjsLib = window.pdfjsLib;
@@ -191,6 +226,10 @@
             logContainer.innerHTML = '';
             log('분석 프로세스를 시작합니다.');
             log(`선택된 모델: ${modelSelect.value}`);
+            const selectedConfig = MODEL_CONFIGS[modelSelect.value];
+            if (selectedConfig) {
+                log(`적용 파라미터 → temperature=${selectedConfig.temperature}, max_tokens=${selectedConfig.max_output_tokens}, top_p=${selectedConfig.top_p}`);
+            }
 
             try {
                 log('프롬프트 파일을 읽고 분석합니다...');
@@ -239,6 +278,8 @@
                 spinner.classList.add('hidden');
             }
         });
+
+        updateModelHint(modelSelect.value);
     </script>
 </body>
 </html>
