@@ -35,11 +35,11 @@ def _normalize_content_parts(content_parts):
         if part_type == "text":
             text_value = part.get("text")
             if isinstance(text_value, str):
-                normalized.append({"type": "input_text", "text": text_value})
+                normalized.append({"type": "text", "text": text_value})
         elif part_type == "image_url":
             image_url = part.get("image_url")
             if isinstance(image_url, dict) and image_url.get("url"):
-                normalized.append({"type": "input_image", "image_url": {"url": image_url["url"]}})
+                normalized.append({"type": "input_image", "image_url": image_url["url"]})
 
     if not normalized:
         for part in content_parts:
