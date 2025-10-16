@@ -124,14 +124,34 @@ def analyze():
     normalized_content = _normalize_content_parts(content_parts)
 
     # 프론트엔드에서 받은 데이터를 기반으로 OpenAI에 보낼 payload를 구성합니다.
+    requested_model = data.get("model", "gpt-5-mini")
+    model_presets = {
+        "gpt-5-mini": {
+            "max_output_tokens": 4096,
+            "temperature": 0.2,
+            "top_p": 0.8,
+        },
+        "gpt-4o": {
+            "max_output_tokens": 3072,
+            "temperature": 0.6,
+            "top_p": 0.9,
+        },
+    }
+
+    if requested_model not in model_presets:
+        print(f"⚠️ 지원하지 않는 모델이 요청되었습니다: {requested_model}. gpt-5-mini로 대체합니다.")
+
+    model = requested_model if requested_model in model_presets else "gpt-5-mini"
+    model_payload_options = model_presets[model]
+
     payload = {
         # gpt-5-mini는 텍스트와 이미지 URL이 혼합된 메시지를 처리할 수 있는 멀티모달 모델입니다.
-        "model": "gpt-5-mini",
+        "model": model,
         "input": [{
             "role": "user",
             "content": normalized_content,
         }],
-        "max_output_tokens": 4096,
+        **model_payload_options,
     }
 
     headers = {
@@ -140,7 +160,11 @@ def analyze():
     }
 
     try:
-        print("🚀 OpenAI API에 분석을 요청합니다...")
+        print(
+            "🚀 OpenAI API에 분석을 요청합니다... "
+            f"(model={model}, temperature={model_payload_options['temperature']}, "
+            f"max_output_tokens={model_payload_options['max_output_tokens']}, top_p={model_payload_options['top_p']})"
+        )
         response = requests.post(OPENAI_API_URL, headers=headers, json=payload)
         response.raise_for_status()  # HTTP 오류가 발생하면 예외를 발생시킵니다.
         print("✅ OpenAI API로부터 응답을 받았습니다.")
