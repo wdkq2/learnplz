@@ -38,7 +38,8 @@ def analyze():
     
     # 프론트엔드에서 받은 데이터를 기반으로 OpenAI에 보낼 payload를 구성합니다.
     payload = {
-        "model": "gpt-4o",
+        # gpt-5-mini는 텍스트와 이미지 URL이 혼합된 메시지를 처리할 수 있는 멀티모달 모델입니다.
+        "model": "gpt-5-mini",
         "messages": [{
             "role": "user",
             "content": data.get("content_parts", [])
