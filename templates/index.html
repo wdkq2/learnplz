@@ -4,11 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>수업 자료 AI 분석기 (서버 버전)</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233b82f6'/%3E%3Ctext x='50%25' y='50%25' dy='.35em' text-anchor='middle' font-family='Inter, sans-serif' font-size='32' fill='white'%3EL%3C/text%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <script src="{{ url_for('static', filename='js/pdf.min.js') }}"></script>
-    <script>
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "{{ url_for('static', filename='js/pdf.worker.min.js') }}";
+
+    <script type="module">
+        import * as pdfjsLib from "{{ url_for('static', filename='js/pdf.min.js') }}";
+        const workerUrl = "{{ url_for('static', filename='js/pdf.worker.min.js') }}";
+        try {
+            const pdfWorker = new Worker(workerUrl, { type: 'module' });
+            pdfjsLib.GlobalWorkerOptions.workerPort = pdfWorker;
+        } catch (error) {
+            console.error('PDF.js 워커 초기화에 실패했습니다. 메인 스레드에서 렌더링합니다.', error);
+        }
+        window.pdfjsLib = pdfjsLib;
     </script>
     
     <style>
@@ -84,6 +92,10 @@
         }
 
         async function convertPdfToImages(file) {
+            const pdfjsLib = window.pdfjsLib;
+            if (!pdfjsLib) {
+                throw new Error('PDF.js 라이브러리가 초기화되지 않았습니다.');
+            }
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
             const images = [];
@@ -129,6 +141,9 @@
         }
         
         async function createDocxReport(title, global_summary, analysis_results) {
+            if (!window.docx) {
+                throw new Error('DOCX.js 라이브러리가 초기화되지 않았습니다.');
+            }
             const { Document, Packer, Paragraph, HeadingLevel, ImageRun, TextRun } = docx;
             const doc = new Document({ sections: [{
                 children: [
