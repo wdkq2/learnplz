@@ -32,14 +32,26 @@ def _normalize_content_parts(content_parts):
             continue
 
         part_type = part.get("type")
-        if part_type == "text":
+
+        if part_type in {"text", "input_text"}:
             text_value = part.get("text")
             if isinstance(text_value, str):
-                normalized.append({"type": "text", "text": text_value})
-        elif part_type == "image_url":
+                normalized.append({"type": "input_text", "text": text_value})
+            continue
+
+        if part_type in {"image_url", "input_image"}:
             image_url = part.get("image_url")
-            if isinstance(image_url, dict) and image_url.get("url"):
-                normalized.append({"type": "input_image", "image_url": image_url["url"]})
+            if isinstance(image_url, dict):
+                url_value = image_url.get("url")
+            else:
+                url_value = image_url
+            if isinstance(url_value, str) and url_value:
+                normalized.append({"type": "input_image", "image_url": url_value})
+            continue
+
+        # Passthrough any already-normalized content blocks.
+        if part_type in {"input_audio", "input_video", "input_file"}:
+            normalized.append(part)
 
     if not normalized:
         for part in content_parts:
